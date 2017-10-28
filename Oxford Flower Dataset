@@ -1,0 +1,116 @@
+
+""" AlexNet.
+Applying 'Alexnet' to Oxford's 17 Category Flower Dataset classification task.
+References:
+    - Alex Krizhevsky, Ilya Sutskever & Geoffrey E. Hinton. ImageNet
+    Classification with Deep Convolutional Neural Networks. NIPS, 2012.
+    - 17 Category Flower Dataset. Maria-Elena Nilsback and Andrew Zisserman.
+Links:
+    - [AlexNet Paper](http://papers.nips.cc/paper/4824-imagenet-classification-with-deep-convolutional-neural-networks.pdf)
+    - [Flower Dataset (17)](http://www.robots.ox.ac.uk/~vgg/data/flowers/17/)
+"""
+
+from __future__ import division, print_function, absolute_import
+
+import sys
+
+import tensorflow as tf
+import tflearn
+from tflearn.layers.core import input_data, dropout, fully_connected
+from tflearn.layers.conv import conv_2d, max_pool_2d
+from tflearn.layers.normalization import local_response_normalization
+from tflearn.layers.estimator import regression
+from sklearn.metrics import confusion_matrix
+import datetime
+from sklearn.metrics import accuracy_score
+# Tensorboard
+tensorboard_verbose = 3
+log_dir = 'alexnet_logs/'
+
+# optimizers: SGD, AdaGrad, Adam, RMSProp, Momentum, Ftrl, AdaDelta
+optimizer_name = 'sgd'
+if len(sys.argv) >= 2:
+    optimizer_name = sys.argv[1]
+print('Optimizer: ' + optimizer_name)
+
+# objectives: categorical_crossentropy, binary_crossentropy, softmax_categorical_crossentropy, hinge_loss, mean_square
+loss_name = 'softmax_categorical_crossentropy'
+
+# Training parameters
+n_epoch=50#200 # epoch
+valid_ratio=0.1 # validation ratio
+is_shuffle=True
+is_show_metric=True
+batch_size=64 # batch size
+learning_rate = 0.001 # learning rate
+if len(sys.argv) >= 3:
+    learning_rate = float(sys.argv[2])
+    print('Learning rate: ' + str(learning_rate))
+
+# Job id
+run_id = 'alexnet_oxflowers17_' + optimizer_name + str(learning_rate)
+
+# Device
+gpu = '/gpu:0'
+cpu = '/cpu:0'
+
+# Checkpoint & snapshot
+check_path = 'model_' + optimizer_name + str(learning_rate)
+max_checkpoints = 10
+snapshot_step=200
+is_snapshot_epoch=False
+
+# Dataset
+import tflearn.datasets.oxflower17 as oxflower17
+X, Y = oxflower17.load_data(dirname='/home/adit/Desktop/Dataset/17flowers/', one_hot=True, resize_pics=(227, 227))
+X_test = X[0:407]
+Y_test = Y[0:407]
+X = X[408:]
+Y = Y[408:]
+
+tflearn.config.init_graph(log_device=True, soft_placement=True)
+
+# Building 'AlexNet'
+network = input_data(shape=[None, 227, 227, 3])
+network = conv_2d(network, 96, 11, strides=4, activation='relu')
+network = max_pool_2d(network, 3, strides=2)
+network = local_response_normalization(network)
+network = conv_2d(network, 256, 5, activation='relu')
+network = max_pool_2d(network, 3, strides=2)
+network = local_response_normalization(network)
+network = conv_2d(network, 384, 3, activation='relu')
+network = conv_2d(network, 384, 3, activation='relu')
+network = conv_2d(network, 256, 3, activation='relu')
+network = max_pool_2d(network, 3, strides=2)
+network = local_response_normalization(network)
+network = fully_connected(network, 4096, activation='tanh')
+network = dropout(network, 0.5)
+network = fully_connected(network, 4096, activation='tanh')
+network = dropout(network, 0.5)
+network = fully_connected(network, 17, activation='softmax')
+network = regression(network, optimizer=optimizer_name,
+                     loss=loss_name,
+                     learning_rate=learning_rate)
+
+start_time = datetime.datetime.now()
+
+# Training
+with tf.device(cpu):
+    # Force all Variables to reside on the CPU.
+    # with tf.arg_ops([tflearn.variables.variable], device=cpu):
+    model = tflearn.DNN(network, checkpoint_path=check_path, max_checkpoints=max_checkpoints, 
+                        tensorboard_dir=log_dir, tensorboard_verbose=tensorboard_verbose)
+    model.fit(X, Y, n_epoch=n_epoch, validation_set=valid_ratio, shuffle=is_shuffle,
+              show_metric=is_show_metric, batch_size=batch_size, snapshot_step=snapshot_step,
+              snapshot_epoch=is_snapshot_epoch, run_id=run_id)
+
+end_time = datetime.datetime.now()
+print("Total time of training: %s" % str(end_time - start_time))
+pred = model.predict(X_test)
+for i in range(len(pred)):
+      for j in range(len(pred[i])):        
+            if pred[i][j]==max(pred[i]):
+                  pred[i][j]=1
+            else:
+                  pred[i][j]=0
+print(accuracy_score(Y_test, pred))
